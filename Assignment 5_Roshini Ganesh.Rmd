@@ -1,0 +1,451 @@
+---
+title: "Reducing Recidivism through Fair Algorithms and Investments in Job Training"
+output:
+  html_document:
+    toc: false
+    code_folding: hide
+    code_download: true
+    theme: journal 
+---
+
+```{r Set up Knitting Parameters, include=FALSE, echo=FALSE}
+
+# Set up
+
+  knitr::opts_chunk$set(
+    echo = TRUE,
+    warning = FALSE,
+    message = FALSE,
+    out.width = '100%',
+    fig.retina =3
+  )
+```
+
+```{r Set up Packages, warning = FALSE, message = FALSE, echo=FALSE}
+
+# Load libraries
+
+library(lubridate)
+library(tidyverse)
+library(caret)
+library(kableExtra)
+library(ModelMetrics)
+library(plotROC)
+library(knitr)
+library(grid)
+library(gridExtra)
+library(QuantPsyc)
+library(ggthemes)
+library(ggpubr)
+
+# Set parameters for scientific notation
+
+options(scipen=999)
+
+# Functions and data directory
+
+root.dir = "https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/DATA/"
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+# Invoke color palettes to be used
+
+palette <- c('#FFFFFF',"#FFFFF0","#EEEEE0","#8b8b83","#C1FFC1","#B4EEB4","#9BCD9B","#FF6A6A","#EE6363","#CD5555","#FF8C69","#EE8262","#CD7054")
+
+palettereds <- c("#FF6A6A","#EE6363","#CD5555")
+
+palettegreens <- c("#C1FFC1","#B4EEB4","#9BCD9B")
+
+palettesalmons <- c("#FF8C69","#EE8262","#CD7054")
+
+
+```
+
+| 
+| 
+| 
+| *To: The Mayor of Philadelphia*
+| *From: Roshini Ganesh, Data Scientist, Department of Prisons*
+| *Date: 11/17/2023*  
+| 
+| 
+
+*Dear Mayor,*
+
+**Subject: Recommendations for Improved Recidivism Prediction and Strategic Investment in Inmate Education and Career Training**
+
+In light of the pressing need to address recidivism rates and their associated social and economic costs, I write to bring to your attention an essential initiative aimed at transforming our approach to incarceration and rehabilitation in Philadelphia. I propose the adoption of an improved recidivism prediction algorithm, building upon the COMPAS model used in Broward County, Florida. Additionally, I advocate for substantial government investment in education and career training programs for inmates. This holistic strategy holds the potential to significantly reduce recidivism rates, cut government spending costs, and create a more targeted and effective system of investment.
+
+The financial strain of incarceration, averaging \$42,727 ^1^ annually per inmate in Pennsylvania, necessitates a proactive and cost-effective solution. Beyond the monetary strain, the long-term consequences of high recidivism rates contribute to fractured families, strained community relations, and a perpetuating cycle of crime. Investing in job training programs stands out as a long-term solution that addresses both the immediate financial concerns and the broader social impact of recidivism. By expanding support for comprehensive job training initiatives within correctional facilities, our government can break the cycle of recidivism and reincarceration, reduce societal costs, and empower individuals with the skills needed for successful reintegration.
+
+**1. Improved Recidivism Algorithm:**
+
+Our team has developed an enhanced recidivism algorithm inspired by the COMPAS model. This algorithm incorporates advanced methodologies to address the limitations observed in previous models. It not only exhibits better accuracy but also offers a more nuanced understanding of individual risk factors. The improved algorithm has undergone rigorous testing and validation, demonstrating its efficiency in predicting recidivism with greater precision. This precision also allows us to predict potential government investment required with more confidence and accuracy. 
+
+**2. Government Investment in Education and Career Training Programs:**
+
+In tandem with the algorithm implementation, I strongly recommend a strategic investment in education and career training programs for inmates. Research consistently shows that providing inmates with access to education and vocational training significantly reduces the likelihood of recidivism. Our proposed programs aim to equip inmates with the skills necessary for successful reintegration into society, thereby breaking the cycle of incarceration. 
+
+**2.1. Benefits of Investment:**
+
+*Benefits demonstrated by algorithm:*
+
+Reduced Recidivism: Education and career training have proven to be effective in reducing recidivism rates. Inmates who acquire skills and knowledge during their incarceration are better positioned to secure employment upon release, lowering the probability of re-offending.
+
+Cost Savings: While there is an initial cost associated with implementing education and training programs, the long-term benefits far outweigh the expenses. Reduced recidivism leads to lower incarceration rates, resulting in substantial cost savings for the city. The improved algorithm 
+
+Targeted Approach: Our proposed strategy involves a targeted approach, identifying inmates with a higher risk of recidivism through the improved algorithm. This allows for a more focused allocation of resources to those who need it most.
+
+*Other Benefits:*
+
+Improved Community Integration in Prisons: Investing in inmate education fosters community integration by empowering incarcerated individuals with the tools and support needed for reintegration. This shared experience, in turn, strengthens prison communities and promotes overall social well-being and builds motivation to contribute positively to society.
+
+
+```{r r1 Read Data, warning = FALSE, echo=FALSE, message=FALSE}
+
+# Read Data
+
+compas_data <- read.csv("compas-scores-two-years.csv")
+
+```
+
+```{r r2 Process data, results='hide', echo=FALSE, message=FALSE, warning=FALSE }
+
+# Filter and Mutate Data
+
+df <- 
+  compas_data %>%
+  filter(days_b_screening_arrest <= 30) %>%
+  filter(days_b_screening_arrest >= -30) %>%
+  filter(is_recid == 0 |is_recid == 1) %>%
+  filter(c_charge_degree == "M" | c_charge_degree == "F") %>%
+  filter(priors_count != "36" & priors_count != "25" & priors_count != "38") %>%
+  mutate(StayLength = as.numeric(as.Date(c_jail_out) - as.Date(c_jail_in)),
+         PriorsCount = as.factor(priors_count),
+         Recidivated = as.factor(ifelse(two_year_recid == 1,"Recidivated","Not Recidivated")),
+         RecidivatedBinary = ifelse(Recidivated == "Recidivated", 1, 0),
+         race2 = case_when(race == "Caucasian"        ~ "Caucasian",
+                           race == "African-American" ~ "African-American", 
+                           TRUE                       ~ "Other"))%>%
+  dplyr::select(sex,age,age_cat,race,race2,priors_count,two_year_recid,r_charge_desc,
+         c_charge_desc,c_charge_degree,r_charge_degree,juv_other_count,
+         StayLength,PriorsCount,Recidivated,RecidivatedBinary)
+
+```
+
+```{r 1, message=FALSE, warning=FALSE, echo=FALSE, out.width= "65%", out.extra='style="float:right; padding:8px"'}
+
+# Plot Most frequent initial charges
+
+margin = theme(plot.margin = unit(c(2,2,2,2), "cm"))
+
+pl1<- group_by(df, c_charge_desc) %>%
+  summarize(count = n()) %>%
+  mutate(rate = count / sum(count)) %>%
+  arrange(-rate) %>% head(3) %>%
+  ggplot(aes(reorder(c_charge_desc, rate, FUN = max), 
+             rate, fill = c_charge_desc)) +
+    geom_col() + 
+    scale_fill_manual(values = palettegreens) +
+    labs(x = "Charge", y = "Rate", title= "Most frequent initial charges") +
+    theme_tufte()+ 
+    theme(legend.position = "none",
+          axis.text.y = element_text(color = '#8b8b83', size = 12),
+          axis.text.x = element_text(angle = 45, hjust = 1, color = '#8b8b83', size = 12),
+          text = element_text(size = 14, family = 'Monaco',color = '#8b8b83'),
+          plot.background = element_rect(fill ='#ffffff', color = NA),
+          panel.grid.major.y = element_line(color='grey85',linetype = 'dashed'),
+          plot.margin = unit(c(.5,1.5,.5,.5), "cm")) 
+
+# Plot Recidivism rate by race
+
+pl2<- df %>%
+    group_by(Recidivated, race) %>%
+    summarize(n = n()) %>%
+    mutate(freq = n / sum(n)) %>% filter(Recidivated == "Recidivated") %>%
+    ggplot(aes(reorder(race, -freq), freq)) +
+    geom_bar(stat = "identity", position = "dodge", fill ="#9BCD9B") +
+    labs(title = "Recidivism rate by race",
+         caption = "fig.1",
+         y = "Rate", x = "Race") +
+        theme_tufte()+ 
+    theme(legend.position = "none",
+          axis.text.y = element_text(color = '#8b8b83', size = 12),
+          axis.text.x = element_text(angle = 45, hjust = 1, color = '#8b8b83', size = 12),
+          text = element_text(size = 14, family = 'Monaco', color = '#8b8b83'),
+          plot.background = element_rect(fill ='#ffffff', color = NA),
+          panel.grid.major.y= element_line(color='grey85',linetype = 'dashed'),
+          plot.margin = unit(c(.5,.5,.5,1.5), "cm")) 
+
+pl2
+
+```
+**3. Acknowledging Algorithm Limitations:**
+
+While our algorithm represents a significant advancement, it is crucial to acknowledge its limitations. Fairness, disparate impact, and bias associated with training data are inherent challenges. These issues can potentially perpetuate existing inequalities and reinforce systemic biases within the criminal justice system.
+
+Disproportionate imprisonment perpetuates discriminatory systems, hindering vulnerable communities from attaining basic living standards. Upon release, every formerly incarcerated individual faces the risk of recidivism, with certain populations experiencing higher risks. Figure 1 depicts observed recidivism rates by race in Broward County, Florida.
+
+Contrary to the belief that excluding race from predictive algorithms ensures impartiality, the COMPAS recidivism prediction algorithm by Northpointe, as scrutinized by ProPublica in 2016^2^, exhibits clear errors across different racial groups^2^. Although technically accurate overall, the model fails to generalize well, resulting in a cascading disparate impact.
+
+```{r 3, results= 'hide', echo=FALSE, message=FALSE, warning=FALSE}
+
+# Split data into testing and training sets
+
+train <- df %>% dplyr::sample_frac(.75)
+train_index <- as.numeric(rownames(train))
+test <- df[-train_index, ]
+```
+
+```{r 4, resuluts = 'hide', echo=FALSE, message=FALSE, warning=FALSE}
+reg.noRace <- glm(Recidivated ~ ., data = 
+                    train %>% dplyr::select(sex, age, age_cat,
+                                juv_other_count, StayLength, 
+                                PriorsCount, Recidivated),
+                family = "binomial"(link = "logit"))
+
+reg.withRace <- glm(Recidivated ~ ., data = 
+                      train %>% dplyr::select(sex, age, age_cat, race,
+                                  juv_other_count, StayLength, 
+                                  PriorsCount, Recidivated),
+                family = "binomial"(link = "logit"))
+```
+
+```{r 5, results = 'hide', echo=FALSE, message=FALSE, warning=FALSE}
+testProbs <- 
+  data.frame(class = test$RecidivatedBinary,
+             probs = predict(reg.noRace, test, type = "response"),
+             Race = test$race2)
+```
+
+```{r 8, results = 'hide', echo=FALSE, message=FALSE, warning=FALSE}
+
+iterateThresholds <- function(data, observedClass, predictedProbs, group) {
+  observedClass <- enquo(observedClass)
+  predictedProbs <- enquo(predictedProbs)
+  group <- enquo(group)
+  x = .01
+  all_prediction <- data.frame()
+  
+  if (missing(group)) {
+  
+    while (x <= 1) {
+    this_prediction <- data.frame()
+    
+    this_prediction <-
+      data %>%
+      mutate(predclass = ifelse(!!predictedProbs > x, 1,0)) %>%
+      count(predclass, !!observedClass) %>%
+      summarize(Count_TN = sum(n[predclass==0 & !!observedClass==0]),
+                Count_TP = sum(n[predclass==1 & !!observedClass==1]),
+                Count_FN = sum(n[predclass==0 & !!observedClass==1]),
+                Count_FP = sum(n[predclass==1 & !!observedClass==0]),
+                Rate_TP = Count_TP / (Count_TP + Count_FN),
+                Rate_FP = Count_FP / (Count_FP + Count_TN),
+                Rate_FN = Count_FN / (Count_FN + Count_TP),
+                Rate_TN = Count_TN / (Count_TN + Count_FP),
+                Accuracy = (Count_TP + Count_TN) / 
+                           (Count_TP + Count_TN + Count_FN + Count_FP)) %>%
+      mutate(Threshold = round(x,2))
+    
+    all_prediction <- rbind(all_prediction,this_prediction)
+    x <- x + .01
+  }
+  return(all_prediction)
+  }
+  else if (!missing(group)) { 
+   while (x <= 1) {
+    this_prediction <- data.frame()
+    
+    this_prediction <-
+      data %>%
+      mutate(predclass = ifelse(!!predictedProbs > x, 1,0)) %>%
+      group_by(!!group) %>%
+      count(predclass, !!observedClass) %>%
+      summarize(Count_TN = sum(n[predclass==0 & !!observedClass==0]),
+                Count_TP = sum(n[predclass==1 & !!observedClass==1]),
+                Count_FN = sum(n[predclass==0 & !!observedClass==1]),
+                Count_FP = sum(n[predclass==1 & !!observedClass==0]),
+                Rate_TP = Count_TP / (Count_TP + Count_FN),
+                Rate_FP = Count_FP / (Count_FP + Count_TN),
+                Rate_FN = Count_FN / (Count_FN + Count_TP),
+                Rate_TN = Count_TN / (Count_TN + Count_FP),
+                Accuracy = (Count_TP + Count_TN) / 
+                           (Count_TP + Count_TN + Count_FN + Count_FP)) %>%
+      mutate(Threshold = round(x, 2))
+    
+    all_prediction <- rbind(all_prediction, this_prediction)
+    x <- x + .01
+  }
+  return(all_prediction)
+  }
+}
+
+```
+
+```{r 9,  message=FALSE, warning=FALSE, echo=FALSE, fig.width = 10, fig.height = 5}
+
+testProbs.thresholds <- 
+  iterateThresholds(data=testProbs, observedClass = class, 
+                    predictedProbs = probs, group = Race)
+
+pl5<- filter(testProbs.thresholds, Threshold == .5)  %>%
+  dplyr::select(Accuracy, Race, starts_with("Rate")) %>%
+  gather(Variable, Value, -Race) %>%
+    ggplot(aes(Variable, Value, fill = Race)) +
+      geom_bar(aes(fill = Race), position = "dodge", stat = "identity") +
+      scale_fill_manual(values = palettegreens) +
+      labs(title="Confusion matrix rates by race",
+           caption = 'fig.2',
+           subtitle = "50% threshold", x = "Outcome",y = "Rate") +
+      theme_tufte()+ 
+      theme(legend.position = "bottom",
+          axis.text.y = element_text(color = '#8b8b83', size = 12),
+          axis.text.x = element_text(angle = 45, hjust = 1, color = '#8b8b83', size = 12),
+          text = element_text(size = 12, family = 'Helvetica', color = '#8b8b83'),
+          plot.background = element_rect(fill ='#ffffff', color = NA),
+          panel.grid.major.y= element_line(color='grey85',linetype = 'dashed'),
+          plot.margin = unit(c(.5,.5,.5,1.5), "cm")) 
+
+
+pl6<- filter(testProbs.thresholds, Threshold == .4)  %>%
+  dplyr::select(Accuracy, Race, starts_with("Rate")) %>%
+  gather(Variable, Value, -Race) %>%
+    ggplot(aes(Variable, Value, fill = Race)) +
+      geom_bar(aes(fill = Race), position = "dodge", stat = "identity") +
+      scale_fill_manual(values = palettegreens) +
+      labs(title="Confusion matrix rates by race",
+           caption = 'fig.3',
+           subtitle = "40% threshold", x = "Outcome",y = "Rate") +
+      theme_tufte()+ 
+      theme(legend.position = "bottom",
+          axis.text.y = element_text(color = '#8b8b83', size = 12),
+          axis.text.x = element_text(angle = 45, hjust = 1, color = '#8b8b83', size = 12),
+          text = element_text(size = 12, family = 'Helvetica', color = '#8b8b83'),
+          plot.background = element_rect(fill ='#ffffff', color = NA),
+          panel.grid.major.y= element_line(color='grey85',linetype = 'dashed'),
+          plot.margin = unit(c(.5,.5,.5,1.5), "cm"))
+
+grid.arrange(pl5, pl6, nrow=1)
+
+
+```
+
+**4. Model Nuances**
+
+Our improved model inspired by COMPAS fares better in accounting for embedded data bias. Using COMPAS data from Broward County for training and testing, Figure 2 illustrates our model's performance across racial categories at a 50% threshold. The 'Rate_FP' metric signifies the false positive rate, where individuals predicted to recidivate did not. The false positives predicted by the model at an optimum 40% threshold in Figure 3 indicate the over-representation of the African American community in incarceration and recidivism pointing to embedded data bias. We advocate for the use of this tool to allocate support to individuals at a higher risk of re-offending, as well as increased support to African-American individuals to mitigate recidivism rates.
+
+To enhance the cost efficiency of this program, the decision threshold is optimized from 50% to 40%. As depicted in Figure 3, this adjustment narrows the gap of errors between racial groups while only modestly impacting the algorithm's overall accuracy. The associated costs to the city for each prediction metric are outlined below.
+
+*True Negative:* Individuals predicted to remain crime-free, and indeed, they do. These individuals face minimal challenges reintegrating into society and are not prioritized for the job-training program. Approximately 10% of individuals not anticipated to recidivate may consider applying for the program.
+
+*True Positive:* Individuals predicted to recidivate, and they do so. The associated cost for this scenario is the per-person expense of the job-training program, set at \$10,000. Given a 75% success rate, 25% of these predictions will result in recidivism, incurring an additional cost of \$42,727 per person.
+
+*False Negative:* Individuals predicted to remain crime-free but end up recidivating. The cost linked to this outcome is the per-person expense for incarceration, amounting to \$42,727.
+
+*False Positive:* Individuals predicted to recidivate but do not in reality. The cost associated with this outcome is the per-person expense of the job-training program, valued at $10,000. Redirecting this cost toward true positive outcomes would be a more efficient allocation.
+
+**7. Cost vs Benefits:**
+ 
+Taking the associated costs into consideration, a more nuanced interpretation of figures 2 and 3 emerges in terms of their cost-effectiveness. Lowering the threshold not only augments the rate of False Positives as well as True Positives. While the cost linked to this outcome is higher, it results in a greater number of ex-offenders gaining exposure to the job-training program, consequently amplifying the associated social benefits. 
+
+The cost/benefit table provided below outlines the estimated costs associated with each prediction metric at varying thresholds. Remarkably, by lowering the threshold, we can achieve a reduction of approximately $5,000,000 in funds allocated to the program.
+
+```{r cost.ben.output, echo = FALSE, message=FALSE, warning=FALSE}
+testProbs50 <- 
+  testProbs %>%
+  mutate(predOutcome  = as.factor(ifelse(testProbs$probs > 0.5 , 1, 0)))
+
+cost_benefit_table50 <-
+  testProbs50 %>%
+  count(predOutcome, class) %>%
+  summarize(True_Negative = sum(n[predOutcome==0 & class==0]),
+            True_Positive = sum(n[predOutcome==1 & class==1]),
+            False_Negative = sum(n[predOutcome==0 & class==1]),
+            False_Positive = sum(n[predOutcome==1 & class==0])) %>%
+  gather(Variable, Count) %>%
+  mutate(Cost.65Threshold = case_when(Variable == "True_Negative"  ~ (Count * 0.1) * 10000,
+                          Variable == "True_Positive"  ~ (Count *.75 *10000) + (Count *.25 * 42727),
+                          Variable == "False_Negative" ~ Count * 42727,
+                          Variable == "False_Positive" ~ Count * 10000))
+
+testProbs65 <- 
+  testProbs %>%
+  mutate(predOutcome  = as.factor(ifelse(testProbs$probs > 0.4 , 1, 0)))
+
+cost_benefit_table65 <-
+  testProbs65 %>%
+  count(predOutcome, class) %>%
+  summarize(True_Negative = sum(n[predOutcome==0 & class==0]),
+            True_Positive = sum(n[predOutcome==1 & class==1]),
+            False_Negative = sum(n[predOutcome==0 & class==1]),
+            False_Positive = sum(n[predOutcome==1 & class==0])) %>%
+  gather(Variable, Count) %>%
+  mutate(bind_cols(data.frame(Cost.50 = c(
+                        "639000",
+                        "7636335",
+                        "12091741",
+                        "1980000"))),
+    Cost.40 = case_when(Variable == "True_Negative"  ~ (Count * 0.1) * 10000,
+                          Variable == "True_Positive"  ~ (Count *.75 *10000) + (Count *.25 * 42727),
+                          Variable == "False_Negative" ~ Count * 42727,
+                          Variable == "False_Positive" ~ Count * 10000),
+         bind_cols(data.frame(Social.Benefit = c(
+    "Individual re-enters society and can contribute to local economy without government assistance",
+    "Individual can contribute to local economy with government assistance. Has a 75% chance of not recidivating with training and career support.",
+    "No applicable recidivation outcome, no resources allocated",
+    "Individual can contribute to local economy with government assistance. Has a 100% chance of not recidivating with training and career support."))),
+  bind_cols(data.frame(Description = c(
+    "Individual is NOT predicted to recidivate and did NOT recidivate",
+    "Individual is predicted to recidivate and did recidivate",
+    "Individual is predicted to NOT recidivate and did recidivate",
+    "Individual is predicted to recidivate but did NOT recidivate"))))
+
+cost_ben65<- cost_benefit_table65%>%
+  kable(caption = 'Table 1: Cost/Benefit Table',
+        align= c('l','c','r','r','l','l'))%>%
+  kable_styling(html_font = 'helvetica')
+
+cost_ben65
+```
+
+*Total Cost 50% Threshold:* \$22,347,076  
+*Total Cost 40% Threshold:* \$20,616,648  
+*Difference:*  \$1,730,428  
+
+
+
+**6. Mayor's Role in Decision Making:**
+
+As the Mayor of Philadelphia, your commitment to justice, fairness, and community well-being is paramount. While the algorithm offers valuable insights, it should be employed as a support tool rather than a directive for decision making. Human judgment remains essential, especially in addressing the nuanced and complex aspects of criminal justice.
+
+**7. Conclusion:**
+
+In conclusion, the combined implementation of an improved recidivism algorithm and strategic investment in inmate education and career training programs presents a transformative opportunity for Philadelphia. This comprehensive approach aligns with the city's commitment to justice, rehabilitation, and community welfare. I am available for further discussions and presentations to elaborate on the proposed strategy and answer any questions you may have.
+
+| 
+
+Thank you for your time and consideration.
+
+| 
+| 
+
+Sincerely,
+
+| Roshini Ganesh
+| Data Scientist
+| Department of Prisons
+
+| 
+| 
+
+
+<div style="border-bottom: 1px solid #000; margin-bottom: 20px;"></div>
+
+1. Henrichson, Christian (2017).  *[Vera.org](https://www.vera.org/publications/price-of-prisons-2015-state-spending-trends/price-of-prisons-2015-state-spending-trends/price-of-prisons-2015-state-spending-trends-prison-spending)* Vera Institute of Justice 2017.
+
+
+2. Angwin, Julia, Jeff Larson, Surya Mattu, Lauren Kirchner. *[Machine Bias: There's software used across the country to predict future criminals. And it's biased against blacks](https://www.propublica.org/article/machine-bias-risk-assessments-in-criminal-sentencing)* ProPublica, May 23, 2016
+
+
+
+
